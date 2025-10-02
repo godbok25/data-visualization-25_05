@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>서울 박물관·미술관·갤러리 지도</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <!-- 데이터(JS) -->
+  <script src="museum_data.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+
+    .title {
+      position: absolute; z-index: 1000; left: 12px; top: 12px;
+      background: rgba(255,255,255,.95); border-radius: 10px;
+      padding: 8px 12px; font-weight: 400; font-size: 24px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.08);
+    }
+
+    /* 우상단 툴바 */
+    .toolbar {
+      position: absolute; z-index: 1000; right: 12px; top: 12px;
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid #e5e7eb; background:#fff; color:#111;
+      padding: 6px 10px; border-radius: 10px; cursor: pointer;
+      font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .btn.active { background:#0ea5e9; color:#fff; border-color:#0ea5e9; }
+
+    .listpanel {
+      position: absolute;
+      z-index: 900;
+      right: 12px;
+      top: 50px;
+      width: min(360px, 80vw);
+      max-height: 90vh;
+      overflow: auto;
+      background: rgba(255,255,255,.96);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.12);
+    }
+    .place { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #e5e7eb; }
+    .place strong { font-size: 13px; }
+    .place small { color:#666; }
+    .place .row { display:flex; gap:6px; }
+    .place .btn { padding: 6px 8px; border-radius: 8px; box-shadow: none; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="title">서울 박물관·미술관·갤러리 지도</div>
+
+  <!-- 우측 상단 버튼들 (마커 관련 버튼 제거됨) -->
+  <div class="toolbar">
+    <button id="btnToggleList" class="btn active">시설 목록 닫기</button>
+    <button id="btnReset" class="btn">서울 전체 보기</button>
+  </div>
+
+  <!-- 목록 패널 -->
+  <div class="listpanel" id="listPanel">
+    <h3>시설 목록</h3>
+    <div id="listWrap"></div>
+  </div>
+
+  <script>
+  const SEOUL_BOUNDS = [[37.413294, 126.734086], [37.715133, 127.269311]];
+  const map = L.map('map', {
+  center: [37.5665, 126.9780],
+  zoom: 13,
+  zoomControl: false   // ← 이 줄을 추가하면 + / − 버튼이 사라짐
+});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const rows = (DATA.stores || []).filter(s =>
+      Number.isFinite(s.lat) && Number.isFinite(s.lng) &&
+      s.lat >= 37 && s.lat <= 38 && s.lng >= 126 && s.lng <= 128
+    );
+
+    const plainLayer = L.layerGroup();
+    const makePopup = (s) => `
+      <div>
+        <b>${escapeHtml(s.name)}</b><br/>
+        <small>${escapeHtml(s.address || '')}</small><br/>
+        <a href="https://www.google.com/maps?q=${s.lat},${s.lng}" target="_blank" rel="noopener">구글지도 열기</a>
+      </div>`;
+
+      // 마커위 팝업없이
+    // rows.forEach(s => {
+    //   plainLayer.addLayer(L.marker([s.lat, s.lng]).bindPopup(makePopup(s)));
+    // });
+      
+// 처음 자동으로 열어둘 팝업 개수
+const AUTO_OPEN_COUNT = 15;
+
+rows.forEach((s, i) => {
+  // ① autoClose:false 로 여러 팝업 동시 유지
+  const marker = L.marker([s.lat, s.lng])
+    .bindPopup(makePopup(s), { autoClose: false });
+
+  // ② plainLayer에 넣고
+  plainLayer.addLayer(marker);
+
+  // ③ 지도에 실제로 올라간 직후에만 열기(시점 문제 해결)
+  if (i < AUTO_OPEN_COUNT) {
+    marker.once('add', () => marker.openPopup());
+  }
+});
+    // 기본: "전체보기" (plainLayer)
+    map.addLayer(plainLayer);
+
+    // 목록 생성
+    const listPanel = document.getElementById('listPanel');
+    const listWrap  = document.getElementById('listWrap');
+
+    function buildList(){
+      listWrap.innerHTML = '';
+      rows.forEach((s, i) => {
+        const div = document.createElement('div');
+        div.className = 'place';
+        div.innerHTML = `
+          <strong>${escapeHtml(s.name)}</strong><br/>
+          <small>${escapeHtml(s.address || '')}</small>
+          <div class="row">
+            <button class="btn" data-i="${i}" data-act="goto">이 위치 보기</button>
+            <a class="btn" href="https://www.google.com/maps?q=${s.lat},${s.lng}" target="_blank" rel="noopener">주소로 보기</a>
+          </div>`;
+        listWrap.appendChild(div);
+      });
+
+      listWrap.querySelectorAll('button[data-act="goto"]').forEach(b=>{
+        b.addEventListener('click', (e)=>{
+          const idx = +e.currentTarget.dataset.i;
+          const s = rows[idx];
+          L.popup({ offset:[0,-6] })
+            .setLatLng([s.lat, s.lng])
+            .setContent(makePopup(s))
+            .openOn(map);
+          map.setView([s.lat, s.lng], Math.max(map.getZoom(), 14), { animate: true });
+        });
+      });
+    }
+    buildList();
+
+    // 목록 토글
+    let listOpen = true;
+    const btnToggleList = document.getElementById('btnToggleList');
+    btnToggleList.addEventListener('click', ()=>{
+      listOpen = !listOpen;
+      listPanel.style.display = listOpen ? 'block' : 'none';
+      btnToggleList.classList.toggle('active', listOpen);
+      btnToggleList.textContent = listOpen ? '시설 목록 닫기' : '시설 목록 열기';
+    });
+
+// 서울 전체 보기
+document.getElementById('btnReset').addEventListener('click', ()=>{
+  map.setView([37.5665, 126.9780], 13);   // 중심, 줌 13
+});
+
+    function escapeHtml(str){
+      return String(str ?? '').replace(/[&<>\"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[c]
+      ));
+    }
+  </script>
+</body>
+</html>
